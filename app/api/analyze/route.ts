@@ -4,7 +4,9 @@ import Anthropic from "@anthropic-ai/sdk";
 // Extend the Vercel serverless function timeout (requires Pro plan for full 60s)
 export const maxDuration = 60;
 
-const client = new Anthropic();
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
 const SYSTEM_PROMPT = `You are an expert business process analyst specializing in process automation, risk assessment, and technology selection.
 
@@ -46,34 +48,27 @@ export async function POST(req: NextRequest) {
     }
 
     const userContent = [
-      `**Process Description:**\n${processDescription.trim()}`,
-      `**Business Rule:**\n${businessRule.trim()}`,
-      volumeSla?.trim() ? `**Volume / SLA:**\n${volumeSla.trim()}` : null,
+      `Process Description:\n${processDescription.trim()}`,
+      `Business Rule:\n${businessRule.trim()}`,
+      volumeSla?.trim() ? `Volume / SLA:\n${volumeSla.trim()}` : null,
     ]
       .filter(Boolean)
       .join("\n\n");
 
-    // Use streaming with finalMessage() to avoid HTTP timeouts on long responses.
-    // "adaptive" thinking is supported by claude-opus-4-6 at runtime; the installed
-    // SDK types (which only know "enabled" | "disabled") lag behind the API, so we
-    // cast to satisfy the compiler without losing type safety elsewhere.
     const stream = client.messages.stream({
       model: "claude-opus-4-6",
       max_tokens: 4096,
-      thinking: { type: "adaptive" } as unknown as { type: "enabled"; budget_tokens: number },
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });
 
     const response = await stream.finalMessage();
 
-    // Locate the text block (thinking blocks are separate content entries)
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") {
       throw new Error("No text response received from model.");
     }
 
-    // Strip accidental markdown code fences then parse
     const raw = textBlock.text
       .trim()
       .replace(/^```(?:json)?\s*/m, "")
