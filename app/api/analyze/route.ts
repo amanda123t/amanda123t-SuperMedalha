@@ -53,11 +53,14 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join("\n\n");
 
-    // Use streaming with finalMessage() to avoid HTTP timeouts on long responses
+    // Use streaming with finalMessage() to avoid HTTP timeouts on long responses.
+    // "adaptive" thinking is supported by claude-opus-4-6 at runtime; the installed
+    // SDK types (which only know "enabled" | "disabled") lag behind the API, so we
+    // cast to satisfy the compiler without losing type safety elsewhere.
     const stream = client.messages.stream({
       model: "claude-opus-4-6",
       max_tokens: 4096,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive" } as { type: "enabled"; budget_tokens: number },
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });
