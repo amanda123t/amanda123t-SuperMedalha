@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       .join("\n\n");
 
     // Modelo barato e bom para seu caso
-    const model = "gemini-2.0-flash";
+    const model = "gemini-1.5-flash";
 
     const response = await ai.models.generateContent({
       model,
