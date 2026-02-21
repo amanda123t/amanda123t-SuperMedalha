@@ -8,7 +8,9 @@ const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const SYSTEM_PROMPT = `You are an expert business process analyst specializing in process automation, risk assessment, and technology selection.
+const SYSTEM_PROMPT = `You are an expert business process analyst specializing in process automation, BPO transformation, risk assessment, and technology selection.
+
+Respond ONLY in Brazilian Portuguese using executive, clear and objective language.
 
 Analyze the provided business process and rule, then respond with ONLY a valid JSON object — no markdown fences, no text outside the JSON. Use this exact structure:
 
@@ -42,14 +44,14 @@ export async function POST(req: NextRequest) {
 
     if (!processDescription?.trim() || !businessRule?.trim()) {
       return NextResponse.json(
-        { error: "Process description and business rule are required." },
+        { error: "Descrição do processo e regra de negócio são obrigatórias." },
         { status: 400 }
       );
     }
 
     const userContent = [
-      `Process Description:\n${processDescription.trim()}`,
-      `Business Rule:\n${businessRule.trim()}`,
+      `Descrição do processo:\n${processDescription.trim()}`,
+      `Regra de negócio:\n${businessRule.trim()}`,
       volumeSla?.trim() ? `Volume / SLA:\n${volumeSla.trim()}` : null,
     ]
       .filter(Boolean)
@@ -66,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") {
-      throw new Error("No text response received from model.");
+      throw new Error("Nenhuma resposta textual recebida do modelo.");
     }
 
     const raw = textBlock.text
@@ -82,13 +84,13 @@ export async function POST(req: NextRequest) {
 
     if (error instanceof SyntaxError) {
       return NextResponse.json(
-        { error: "Failed to parse model response. Please try again." },
+        { error: "Falha ao interpretar a resposta do modelo. Tente novamente." },
         { status: 500 }
       );
     }
 
     const message =
-      error instanceof Error ? error.message : "Analysis failed. Please try again.";
+      error instanceof Error ? error.message : "Falha na análise. Tente novamente.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
