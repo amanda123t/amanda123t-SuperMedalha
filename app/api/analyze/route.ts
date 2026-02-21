@@ -7,12 +7,11 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY!,
 });
 
-// Mantém o seu prompt em PT-BR e exigindo JSON
 const SYSTEM_PROMPT = `Você é um especialista em análise de processos de negócio, automação, transformação de BPO, avaliação de riscos e recomendação tecnológica (OCR, IA, RPA, Workflow).
 
 Responda SOMENTE em português do Brasil, com linguagem executiva, clara e objetiva.
 
-Responda APENAS com um JSON válido — sem markdown e sem texto fora do JSON — usando exatamente a estrutura combinada no meu produto.`;
+Responda APENAS com um JSON válido — sem markdown e sem texto fora do JSON — seguindo exatamente a estrutura combinada no meu produto.`;
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,8 +33,7 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join("\n\n");
 
-    // ⚠️ Modelo: comece com Flash (bem mais barato).
-    // Se der “model not found”, troque pelo modelo disponível na sua conta/região.
+    // Modelo barato e bom para seu caso
     const model = "gemini-2.0-flash";
 
     const response = await ai.models.generateContent({
@@ -46,24 +44,24 @@ export async function POST(req: NextRequest) {
           parts: [{ text: `${SYSTEM_PROMPT}\n\n${userContent}` }],
         },
       ],
-      generationConfig: {
+      // ✅ Neste SDK, o correto é "config" (não "generationConfig")
+      config: {
         temperature: 0.2,
         maxOutputTokens: 4096,
-        // Ajuda muito a forçar JSON “limpo”
         responseMimeType: "application/json",
       },
     });
 
     const raw = (response.text ?? "").trim();
-
     if (!raw) {
       throw new Error("Nenhuma resposta textual recebida do modelo.");
     }
 
-    // Segurança extra: remove fences se vierem
+    // Segurança extra caso venha com fences (mesmo pedindo JSON)
     const cleaned = raw
       .replace(/^```(?:json)?\s*/m, "")
-      .replace(/\s*```\s*$/m, "");
+      .replace(/\s*```\s*$/m, "")
+      .trim();
 
     const analysis = JSON.parse(cleaned);
     return NextResponse.json(analysis);
@@ -72,7 +70,10 @@ export async function POST(req: NextRequest) {
 
     if (error instanceof SyntaxError) {
       return NextResponse.json(
-        { error: "Falha ao interpretar a resposta do modelo. Tente novamente." },
+        {
+          error:
+            "Falha ao interpretar a resposta do modelo (JSON inválido). Tente novamente.",
+        },
         { status: 500 }
       );
     }
