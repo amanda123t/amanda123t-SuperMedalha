@@ -5,8 +5,9 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "AI Process Rule Validator",
-  description: "Analyze business process rules for clarity, risk, and automation potential.",
+  title: "GMO em Prática",
+  description:
+    "Ferramenta interativa de aprendizado em Gestão de Mudança Organizacional para times comerciais.",
 };
 
 export default function RootLayout({
@@ -15,7 +16,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <body className={inter.className}>{children}</body>
     </html>
   );
