@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-**AI Process Rule Validator** is a Next.js 14 (App Router) web application that uses Claude to analyze business process rules. Users provide a process description and a business rule (with an optional Volume/SLA field), click **Analyze**, and receive a structured AI-generated assessment across five dimensions.
+**AI Process Rule Validator** is a Next.js 14 (App Router) web application that uses Claude to analyze business process rules. Users can run analyses in a standalone mode or organise them inside **Projects** with a persistent history timeline backed by Neon Postgres.
+
+UI text is in **Brazilian Portuguese (PT-BR)**. Code, file names, and variables stay in English. Code comments are in PT-BR.
 
 ---
 
@@ -11,10 +13,11 @@
 | Layer | Technology |
 |---|---|
 | Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
+| Language | TypeScript (strict mode) |
 | Styling | Tailwind CSS |
 | AI SDK | `@anthropic-ai/sdk` |
 | Model | `claude-opus-4-6` with adaptive thinking |
+| Database | Neon Postgres (`@neondatabase/serverless`) |
 | Deployment | Vercel (serverless) |
 
 ---
@@ -24,13 +27,33 @@
 ```
 /
 ├── app/
-│   ├── globals.css          # Tailwind base styles
-│   ├── layout.tsx           # Root layout (metadata, font)
-│   ├── page.tsx             # Main UI — form + result cards
+│   ├── globals.css                          # Tailwind base
+│   ├── layout.tsx                           # Root layout — PT-BR nav, lang="pt-BR"
+│   ├── page.tsx                             # Standalone analysis page (no persistence)
+│   ├── projects/
+│   │   ├── page.tsx                         # Server Component — list projects
+│   │   ├── _components/
+│   │   │   └── CreateProjectForm.tsx        # Client Component — create project
+│   │   └── [id]/
+│   │       ├── page.tsx                     # Server Component — project + timeline
+│   │       ├── _components/
+│   │       │   └── AnalyzeForm.tsx          # Client Component — new analysis form
+│   │       └── analyses/
+│   │           └── [analysisId]/
+│   │               └── page.tsx             # Server Component — analysis result
 │   └── api/
-│       └── analyze/
-│           └── route.ts     # POST /api/analyze — calls Claude
-├── .env.example             # Environment variable template
+│       ├── analyze/
+│       │   └── route.ts                     # POST — Claude + optional persistence
+│       └── projects/
+│           ├── route.ts                     # GET list / POST create
+│           └── [id]/
+│               ├── route.ts                 # GET single project
+│               └── analyses/
+│                   └── route.ts             # GET analyses by project
+├── lib/
+│   ├── db.ts                                # Neon client (lazy init)
+│   └── schema.sql                           # DDL — run once in Neon SQL console
+├── .env.example
 ├── .gitignore
 ├── next.config.js
 ├── package.json
@@ -43,17 +66,31 @@
 
 ## Environment Variables
 
-Copy `.env.example` to `.env.local` and fill in your key:
-
 ```bash
 cp .env.example .env.local
 ```
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key from console.anthropic.com |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key — console.anthropic.com |
+| `DATABASE_URL` | Yes (for projects) | Neon connection string — console.neon.tech |
 
-**Never commit `.env.local` or any file containing your API key.**
+**Never commit `.env.local`.**
+
+---
+
+## Database Setup
+
+Run `lib/schema.sql` once in the Neon SQL Console:
+
+```sql
+-- Creates tables: projects, analyses
+-- Run via: Neon Console → SQL Editor → paste schema.sql
+```
+
+Tables:
+- **projects** — `id (uuid PK)`, `name`, `description`, `created_at`, `updated_at`
+- **analyses** — `id (uuid PK)`, `project_id (FK → projects)`, `process_description`, `business_rule`, `volume_sla`, `result (jsonb)`, `created_at`
 
 ---
 
@@ -68,100 +105,99 @@ npm run lint     # ESLint
 
 ---
 
-## API Route: `POST /api/analyze`
+## API Routes
 
+### `POST /api/analyze`
 **File:** `app/api/analyze/route.ts`
 
-### Request body
-
+**Request body:**
 ```json
 {
   "processDescription": "string (required)",
   "businessRule": "string (required)",
-  "volumeSla": "string (optional)"
+  "volumeSla": "string (optional)",
+  "project_id": "uuid (optional — enables persistence)"
 }
 ```
 
-### Response shape
-
+**Response:**
 ```json
 {
-  "rule_clarity": {
-    "score": "Clear | Partially Clear | Unclear",
-    "analysis": "string"
-  },
-  "operational_risks": {
-    "summary": "string",
-    "items": ["string"]
-  },
-  "automation_opportunities": {
-    "summary": "string",
-    "items": ["string"]
-  },
-  "recommended_technology": {
-    "technologies": ["RPA", "AI", "Workflow", "OCR"],
-    "rationale": "string"
-  },
-  "complexity_level": {
-    "level": "Low | Medium | High",
-    "explanation": "string"
-  }
+  "rule_clarity":             { "score": "...", "analysis": "..." },
+  "operational_risks":        { "summary": "...", "items": ["..."] },
+  "automation_opportunities": { "summary": "...", "items": ["..."] },
+  "recommended_technology":   { "technologies": ["RPA","AI","Workflow","OCR"], "rationale": "..." },
+  "complexity_level":         { "level": "Low|Medium|High", "explanation": "..." },
+  "analysis_id":              "uuid (only present when project_id was provided and saved)"
 }
 ```
 
-### How it works
+How it works:
+1. Validates required fields (400 if missing).
+2. Calls `claude-opus-4-6` via `stream.finalMessage()`.
+3. Finds `text` block (skips `thinking` blocks).
+4. Strips markdown fences and `JSON.parse`s.
+5. If `project_id` provided → inserts row in `analyses` table, adds `analysis_id` to response.
+6. DB failure is silent — analysis still returns even if persistence fails.
 
-1. Validates required fields; returns 400 if missing.
-2. Calls `claude-opus-4-6` with `thinking: { type: "adaptive" }` via streaming (`stream.finalMessage()`).
-3. Locates the `text` block in `response.content` (separate from any `thinking` blocks).
-4. Strips any accidental markdown code fences, then `JSON.parse`s the result.
-5. Returns the structured JSON to the client.
-
-### Error responses
-
-```json
-{ "error": "Human-readable message" }
-```
-
-HTTP 400 — missing required fields
-HTTP 500 — model error or JSON parse failure
+### `GET /api/projects` — lista projetos com contagem de análises
+### `POST /api/projects` — cria projeto (`{ name, description? }`)
+### `GET /api/projects/[id]` — retorna projeto pelo ID
+### `GET /api/projects/[id]/analyses` — lista análises do projeto
 
 ---
 
-## UI: `app/page.tsx`
+## Frontend Pages
 
-Client component (`"use client"`). State:
-
-- `processDescription`, `businessRule`, `volumeSla` — controlled textarea/input values
-- `loading` — shows skeleton cards while the API call is in flight
-- `result` — typed `AnalysisResult | null`; renders five result cards when set
-- `error` — shows a red banner on failure
-
-The **Analyze** button is disabled until both required fields have content and the request is not in flight.
+| Route | Type | Description |
+|---|---|---|
+| `/` | Client Component | Standalone analysis (no project, no persistence) |
+| `/projects` | Server Component | List + create projects |
+| `/projects/[id]` | Server Component | Project detail + analysis timeline |
+| `/projects/[id]/analyses/[analysisId]` | Server Component | Full analysis result |
 
 ---
 
 ## Deployment to Vercel
 
-1. Push to GitHub (or connect the repo directly in Vercel).
-2. In the Vercel project settings → **Environment Variables**, add `ANTHROPIC_API_KEY`.
-3. Deploy — Vercel auto-detects Next.js and applies the correct build settings.
+1. Push to GitHub.
+2. In Vercel → Settings → Environment Variables add `ANTHROPIC_API_KEY` and `DATABASE_URL`.
+3. Deploy — Vercel auto-detects Next.js.
+4. Run `lib/schema.sql` in Neon SQL Console before first use.
 
-> **Timeout note:** The API route sets `export const maxDuration = 60`. On Vercel's **Hobby** plan the limit is 10 s; upgrade to **Pro** to use the full 60 s budget. Claude responses with adaptive thinking can occasionally take 15–30 s.
+> **Timeout note:** `maxDuration = 60`. Vercel Hobby plan caps at 10 s; Pro gives 60 s. Claude with adaptive thinking can take 15–30 s.
 
 ---
 
 ## Key Conventions
 
-- **App Router only** — no `pages/` directory. All routes live under `app/`.
-- **Server Components by default** — only `app/page.tsx` is a Client Component (`"use client"`).
-- **Streaming over plain `create()`** — use `client.messages.stream(…).finalMessage()` in API routes to avoid HTTP timeouts on large or thinking-heavy responses.
-- **Adaptive thinking** — pass `thinking: { type: "adaptive" }` to `claude-opus-4-6`. Do not set `budget_tokens` (deprecated on this model).
-- **Text block extraction** — when thinking is enabled, `response.content` is an array that may start with a `thinking` block. Always find the `text` block explicitly with `.find((b) => b.type === "text")`.
-- **JSON robustness** — strip markdown code fences before `JSON.parse` in case the model wraps output in ` ```json ` blocks.
-- **No authentication** — this app has no auth layer by design.
-- **Tailwind only** — no CSS modules, no styled-components. All styles are Tailwind utility classes.
-- **TypeScript strict mode** — `strict: true` in `tsconfig.json`. All interfaces for API response shapes are defined in `app/page.tsx`.
+- **App Router only** — no `pages/` directory.
+- **Server Components by default** — Client Components only for interactivity (`"use client"`).
+- **Streaming** — `client.messages.stream(…).finalMessage()` to avoid timeouts.
+- **Adaptive thinking** — `thinking: { type: "adaptive" }` on `claude-opus-4-6`. No `budget_tokens`.
+- **Text block extraction** — `response.content.find((b) => b.type === "text")`.
+- **JSON robustness** — strip markdown fences before `JSON.parse`.
+- **Neon lazy init** — `getDb()` in `lib/db.ts` defers `neon(url)` to runtime, avoiding build errors when `DATABASE_URL` is absent.
+- **Graceful DB degradation** — persistence errors are caught and logged; analysis response is never blocked by DB failures.
+- **No auth** — no authentication layer by design.
+- **Tailwind only** — no CSS modules or styled-components.
+- **TypeScript strict** — `strict: true` in `tsconfig.json`.
+
+---
+
+## Product Evolution Roadmap
+
+After persistence is stable, suggested next features (priority order):
+
+| # | Feature | Value |
+|---|---|---|
+| 1 | **Tags por análise** | Categorize análises (ex: Financeiro, RH, Logística) |
+| 2 | **Marcar como validada** | Destaca análises aprovadas pelo time |
+| 3 | **Comentários** | Discussão assíncrona por análise |
+| 4 | **Export to PPT** | Geração de apresentação via python-pptx ou similar |
+| 5 | **Geração de backlog** | Transforma análise em user stories exportáveis |
+| 6 | **Dashboard de analytics** | Mix de tecnologias, distribuição de complexidade, ROI estimado |
+| 7 | **Motor de priorização** | Score automático baseado em risco × oportunidade × complexidade |
 
 ---
 
@@ -169,9 +205,7 @@ The **Analyze** button is disabled until both required fields have content and t
 
 | Parameter | Value | Notes |
 |---|---|---|
-| `model` | `claude-opus-4-6` | Current recommended default |
-| `max_tokens` | `4096` | Sufficient for structured JSON output |
-| `thinking` | `{ type: "adaptive" }` | Claude decides when/how much to think |
-| `system` | See `SYSTEM_PROMPT` constant | Instructs JSON-only output |
-
-Do not add date suffixes to model IDs (e.g., never `claude-opus-4-6-20250514`).
+| `model` | `claude-opus-4-6` | Não adicionar sufixo de data |
+| `max_tokens` | `4096` | Suficiente para JSON estruturado |
+| `thinking` | `{ type: "adaptive" }` | Claude decide quando pensar |
+| `system` | `SYSTEM_PROMPT` constant | Instrui saída JSON pura |

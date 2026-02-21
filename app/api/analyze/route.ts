@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { getDb } from "@/lib/db";
 
 export const maxDuration = 60;
 
@@ -16,7 +17,7 @@ Responda APENAS com um JSON válido — sem markdown e sem texto fora do JSON �
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { processDescription, businessRule, volumeSla } = body;
+    const { processDescription, businessRule, volumeSla, project_id } = body;
 
     if (!processDescription?.trim() || !businessRule?.trim()) {
       return NextResponse.json(
@@ -64,7 +65,32 @@ export async function POST(req: NextRequest) {
       .trim();
 
     const analysis = JSON.parse(cleaned);
-    return NextResponse.json(analysis);
+
+    // Persiste a análise no banco quando project_id é fornecido.
+    // Falha silenciosa: não interrompe o fluxo caso o banco esteja indisponível.
+    let analysis_id: string | undefined;
+    if (project_id) {
+      try {
+        const sql = getDb();
+        const [saved] = await sql`
+          INSERT INTO analyses
+            (project_id, process_description, business_rule, volume_sla, result)
+          VALUES
+            (${project_id}::uuid,
+             ${processDescription.trim()},
+             ${businessRule.trim()},
+             ${volumeSla?.trim() || null},
+             ${JSON.stringify(analysis)}::jsonb)
+          RETURNING id
+        `;
+        analysis_id = saved?.id as string;
+      } catch (dbError) {
+        // Registra o erro sem derrubar a resposta da análise
+        console.error("Erro ao persistir análise no banco:", dbError);
+      }
+    }
+
+    return NextResponse.json(analysis_id ? { ...analysis, analysis_id } : analysis);
   } catch (error) {
     console.error("Analysis error:", error);
 
