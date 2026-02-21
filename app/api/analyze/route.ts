@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     const stream = client.messages.stream({
       model: "claude-opus-4-6",
       max_tokens: 4096,
-      thinking: { type: "adaptive" } as { type: "enabled"; budget_tokens: number },
+      thinking: { type: "adaptive" } as unknown as { type: "enabled"; budget_tokens: number },
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });
